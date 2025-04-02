@@ -1,26 +1,9 @@
 import tiktoken
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 
-
-class GPTDatasetV1(Dataset):
-    def __init__(self, text, tokenizer, max_length, stride):
-        self.input_ids = []
-        self.target_ids = []
-
-        token_ids = tokenizer.encode(text)
-
-        for i in range(0, len(token_ids) - max_length, stride):
-            input_chunk = token_ids[i:i + max_length]
-            target_chunk = token_ids[i + 1: i + max_length + 1]
-            self.input_ids.append(torch.tensor(input_chunk))
-            self.target_ids.append(torch.tensor(target_chunk))
-
-    def __len__(self):
-        return len(self.input_ids)
-
-    def __getitem__(self, idx):
-        return self.input_ids[idx], self.target_ids[idx]
+from attention import MultiHeadAttention
+from gpt_dataset import GPTDatasetV1
 
 
 def create_dataloader_v1(text, batch_size=4, max_length=256, stride=128, shuffle=True, drop_last=True, num_workers=0):
@@ -35,26 +18,6 @@ def create_dataloader_v1(text, batch_size=4, max_length=256, stride=128, shuffle
     )
 
     return dataloader
-
-
-class SelfAttentionV2(torch.nn.Module):
-    def __init__(self, d_in, d_out, qkv_bias=False):
-        super().__init__()
-        self.W_query = torch.nn.Linear(d_in, d_out, bias=qkv_bias)
-        self.W_key = torch.nn.Linear(d_in, d_out, bias=qkv_bias)
-        self.W_value = torch.nn.Linear(d_in, d_out, bias=qkv_bias)
-
-    def forward(self, x):
-        keys = self.W_key(x)
-        queries = self.W_query(x)
-        values = self.W_value(x)
-
-        attn_scores = queries @ keys.T
-        attn_weights = torch.softmax(attn_scores / keys.shape[-1]**0.5, dim=-1)
-
-        context_vec = attn_weights @ values
-
-        return context_vec
 
 
     # Constants
@@ -78,7 +41,7 @@ def input_embedding_pipeline(inputs, max_length=MAX_LENGTH, output_dim=256, voca
 
 
 def main():
-    torch.manual_seed(789)
+    torch.manual_seed(123)
 
     # with open("./data/the-verdict.txt", "r", encoding="utf-8") as f:
     #    raw_text = f.read()
@@ -99,12 +62,18 @@ def main():
             [0.05, 0.80, 0.55]]  # step     (x^6)
     )
 
-    d_in = inputs.shape[1]
+    batch = torch.stack((inputs, inputs), dim=0)
+
+    _, context_length, d_in = batch.shape
     d_out = 2
 
-    sa_v1 = SelfAttentionV2(d_in, d_out)
+    mha = MultiHeadAttention(
+        d_in, d_out, context_length, 0.0, num_heads=2)
 
-    print(sa_v1(inputs))
+    context_vecs = mha(batch)
+
+    print(context_vecs)
+    print("context_vecs.shape:", context_vecs.shape)
 
 
 if __name__ == "__main__":
