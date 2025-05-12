@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 
 from attention import MultiHeadAttention
 from gpt_dataset import GPTDatasetV1
+from model import GptModel, TransformerBlock
 
 
 def create_dataloader_v1(text, batch_size=4, max_length=256, stride=128, shuffle=True, drop_last=True, num_workers=0):
@@ -18,7 +19,6 @@ def create_dataloader_v1(text, batch_size=4, max_length=256, stride=128, shuffle
     )
 
     return dataloader
-
 
     # Constants
 BATCH_SIZE = 8
@@ -40,8 +40,26 @@ def input_embedding_pipeline(inputs, max_length=MAX_LENGTH, output_dim=256, voca
     return token_embeddings + positional_embeddings
 
 
+def generate_text_simple(model, idx, max_new_tokens, context_size):
+    for _ in range(max_new_tokens):
+        idx_cond = idx[:, -context_size:]
+        with torch.no_grad():
+            logits = model(idx_cond)
+
+        logits = logits[:, -1, :]
+
+        probas = torch.softmax(logits, dim=-1)
+
+        idx_next = torch.argmax(probas, dim=-1, keepdim=True)
+
+        idx = torch.cat((idx, idx_next), dim=1)
+
+    return idx
+
+
 def main():
     torch.manual_seed(123)
+    torch.set_printoptions(sci_mode=False)
 
     # with open("./data/the-verdict.txt", "r", encoding="utf-8") as f:
     #    raw_text = f.read()
@@ -53,27 +71,37 @@ def main():
 
     # input_embeddings = input_embedding_pipeline(inputs)
 
-    inputs = torch.tensor(
-        [[0.43, 0.15, 0.89],  # Your     (x^1)
-         [0.55, 0.87, 0.66],  # journey  (x^2)
-            [0.57, 0.85, 0.64],  # starts   (x^3)
-            [0.22, 0.58, 0.33],  # with     (x^4)
-            [0.77, 0.25, 0.10],  # one      (x^5)
-            [0.05, 0.80, 0.55]]  # step     (x^6)
+    GPT_CONFIG_124M = {
+        "vocab_size": 50257,
+        "context_length": 1024,
+        "emb_dim": 768,
+        "n_heads": 12,
+        "n_layers": 12,
+        "drop_rate": 0.1,
+        "qkv_bias": False
+    }
+
+    tokenizer = tiktoken.get_encoding("gpt2")
+
+    model = GptModel(GPT_CONFIG_124M)
+
+    start_context = "Hello, I am"
+
+    encoded = tokenizer.encode(start_context)
+    encoded_tensor = torch.tensor(encoded).unsqueeze(0)
+
+    model.eval()
+
+    out = generate_text_simple(
+        model=model,
+        idx=encoded_tensor,
+        max_new_tokens=6,
+        context_size=GPT_CONFIG_124M["context_length"]
     )
 
-    batch = torch.stack((inputs, inputs), dim=0)
+    decoded_text = tokenizer.decode(out.squeeze(0).tolist())
 
-    _, context_length, d_in = batch.shape
-    d_out = 2
-
-    mha = MultiHeadAttention(
-        d_in, d_out, context_length, 0.0, num_heads=2)
-
-    context_vecs = mha(batch)
-
-    print(context_vecs)
-    print("context_vecs.shape:", context_vecs.shape)
+    print(decoded_text)
 
 
 if __name__ == "__main__":
